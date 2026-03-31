@@ -7,49 +7,32 @@ def move_turtle_square():
     rospy.init_node('turtlesim_square_node', anonymous=True)
 
     pub = rospy.Publisher('/turtle1/cmd_vel', Twist, queue_size=10)
-    rate = rospy.Rate(10)
 
-    vel = Twist()
-
-    rospy.loginfo("Drawing square...")
-
-    rospy.sleep(2)  # allow connection
+    rospy.loginfo("Drawing squares continuously...")
+    rospy.sleep(2)
 
     while not rospy.is_shutdown():
 
-        for i in range(4):
+        rate = rospy.Rate(1)
 
-            # 🔹 Move forward
-            vel.linear.x = 2.0
-            vel.angular.z = 0.0
+        cmd_vel_msg = Twist()
+        cmd_vel_msg.linear.x = 2.0
+        pub.publish(cmd_vel_msg)
 
-            start = rospy.Time.now().to_sec()
-            while rospy.Time.now().to_sec() - start < 2:
-                pub.publish(vel)
-                rate.sleep()
+        rate.sleep()
 
-            # 🔹 Stop
-            vel.linear.x = 0.0
-            pub.publish(vel)
-            rospy.sleep(1)
+        cmd_vel_msg = Twist()
+        cmd_vel_msg.angular.z = 2.0
+        pub.publish(cmd_vel_msg)
 
-            # 🔹 Turn
-            vel.angular.z = 1.57
+        rate.sleep()
 
-            start = rospy.Time.now().to_sec()
-            while rospy.Time.now().to_sec() - start < 1:
-                pub.publish(vel)
-                rate.sleep()
+        rospy.loginfo("One square done, continuing...")
 
-            # 🔹 Stop
-            vel.angular.z = 0.0
-            pub.publish(vel)
-            rospy.sleep(1)
-
-        rospy.loginfo("Square complete!")
-        break   # remove this if you want continuous squares
-
-    rospy.spin()
+    # never reaches here unless stopped
+    vel.linear.x = 0.0
+    vel.angular.z = 0.0
+    pub.publish(vel)
 
 
 if __name__ == '__main__':
