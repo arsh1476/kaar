@@ -22,7 +22,7 @@ def move_turtle_square():
         rate.sleep()
 
         cmd_vel_msg = Twist()
-        cmd_vel_msg.angular.z = 2.0
+        cmd_vel_msg.angular.z = 1.5708
         pub.publish(cmd_vel_msg)
 
         rate.sleep()
@@ -30,11 +30,6 @@ def move_turtle_square():
         rospy.loginfo("One square done, continuing...")
 
     # never reaches here unless stopped
-    vel.linear.x = 0.0
-    vel.angular.z = 0.0
-    pub.publish(vel)
-
-
 if __name__ == '__main__':
     try:
         move_turtle_square()
