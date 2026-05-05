@@ -1,198 +1,180 @@
 #!/usr/bin/env python3
 
-# Import Dependencies
 import rospy
 from geometry_msgs.msg import Twist, Point
 from std_msgs.msg import Float64
 from turtlesim.msg import Pose
 import math
 
+class TurtlesimController:
 
-class TurtlesimStraightsAndTurns:
     def __init__(self):
 
-        # Distance goal variables
-        self.last_distance = 0.0
-        self.start_distance = 0.0
-        self.goal_distance = 0.0
-        self.dist_goal_active = False
-        self.forward_movement = True
+        # -------- State Variables --------
 
-        # Angle goal variables
-        self.goal_angle = 0.0
-        self.angle_goal_active = False
-        self.current_theta = 0.0
-        self.start_angle = 0.0
-        self.rotate_anticlockwise = True
+        # Current pose of the turtle (updated from /turtle1/pose)
+        self.pose = Pose()
 
-        # Position variables
-        self.current_x = 0.0
-        self.current_y = 0.0
-        self.goal_x = 0.0
-        self.goal_y = 0.0
-        self.position_goal_active = False
-        self.position_stage = 0   # 0 = rotate, 1 = move straight
+        # -------- Distance Control --------
+        self.goal_distance = 0          # Target distance to travel
+        self.start_pose = Pose()        # Starting position when goal received
+        self.dist_goal_active = False   # Flag to activate distance control
+        self.forward = True             # Direction of movement
 
-        # Initialize the node
-        rospy.init_node('turtlesim_straights_and_turns_node', anonymous=True)
+        # -------- Angle Control --------
+        self.goal_angle = 0             # Target rotation angle
+        self.angle_goal_active = False  # Flag to activate angle control
 
-        # Subscribers
-        rospy.Subscriber("/turtle_dist", Float64, self.distance_callback)
-        rospy.Subscriber("/goal_angle", Float64, self.goal_angle_callback)
-        rospy.Subscriber("/goal_distance", Float64, self.goal_distance_callback)
-        rospy.Subscriber("/position_goal", Point, self.position_goal_callback)
+        # -------- Position Control --------
+        self.goal_position = Point()        # Target (x, y) position
+        self.position_goal_active = False   # Flag to activate position control
+
+        # -------- Initialize ROS Node --------
+        rospy.init_node('turtlesim_controller_node', anonymous=True)
+
+        # -------- Subscribers --------
+
+        # Subscribe to turtle pose (position + orientation)
         rospy.Subscriber("/turtle1/pose", Pose, self.pose_callback)
 
-        # Publisher
-        self.velocity_publisher = rospy.Publisher('/turtle1/cmd_vel', Twist, queue_size=10)
+        # Subscribe to distance goal
+        rospy.Subscriber("/goal_distance", Float64, self.distance_callback)
 
-        # Timer callback
-        timer_period = 0.01
-        rospy.Timer(rospy.Duration(timer_period), self.timer_callback)
+        # Subscribe to angle goal
+        rospy.Subscriber("/goal_angle", Float64, self.angle_callback)
 
-        rospy.loginfo("Initialized node!")
+        # Subscribe to position goal (x, y)
+        rospy.Subscriber("/goal_position", Point, self.position_callback)
+
+        # -------- Publisher --------
+
+        # Publish velocity commands to move the turtle
+        self.vel_pub = rospy.Publisher('/turtle1/cmd_vel', Twist, queue_size=10)
+
+        # -------- Control Loop --------
+
+        # Timer runs control loop every 0.01 seconds
+        rospy.Timer(rospy.Duration(0.01), self.control_loop)
+
+        rospy.loginfo("Turtlesim Controller Node Started")
         rospy.spin()
 
+    # -------- Callback Functions --------
+
     def pose_callback(self, msg):
-        self.current_x = msg.x
-        self.current_y = msg.y
-        self.current_theta = msg.theta
+        # Update current turtle pose
+        self.pose = msg
 
     def distance_callback(self, msg):
-        self.last_distance = msg.data
-
-    def goal_angle_callback(self, msg):
-        self.goal_angle = abs(msg.data)
-        self.start_angle = self.current_theta
-        self.angle_goal_active = True
-
-        self.rotate_anticlockwise = (msg.data >= 0)
-
-        # only one goal at a time
-        self.dist_goal_active = False
-        self.position_goal_active = False
-
-        rospy.loginfo("Received angle goal: %.3f radians", msg.data)
-
-    def goal_distance_callback(self, msg):
-        self.start_distance = self.last_distance
+        # Set distance goal
         self.goal_distance = abs(msg.data)
-        self.dist_goal_active = True
-        self.forward_movement = (msg.data >= 0)
 
-        # only one goal at a time
+        # Determine direction (forward or backward)
+        self.forward = msg.data > 0
+
+        # Save starting position
+        self.start_pose = self.pose
+
+        # Activate distance control and disable others
+        self.dist_goal_active = True
         self.angle_goal_active = False
         self.position_goal_active = False
 
-        rospy.loginfo("Received distance goal: %.3f", msg.data)
+    def angle_callback(self, msg):
+        # Set angle goal
+        self.goal_angle = msg.data
 
-    def position_goal_callback(self, msg):
-        self.goal_x = msg.x
-        self.goal_y = msg.y
+        # Activate angle control and disable others
+        self.angle_goal_active = True
+        self.dist_goal_active = False
+        self.position_goal_active = False
+
+    def position_callback(self, msg):
+        # Set position goal (x, y)
+        self.goal_position = msg
+
+        # Activate position control and disable others
         self.position_goal_active = True
-        self.position_stage = 0
-
-        # only one goal at a time
         self.dist_goal_active = False
         self.angle_goal_active = False
 
-        rospy.loginfo("Received position goal: x=%.3f, y=%.3f", msg.x, msg.y)
+    # -------- Main Control Logic --------
+
+    def control_loop(self, event):
+
+        cmd = Twist()  # Velocity command
+
+        # -------- POSITION CONTROL --------
+        if self.position_goal_active:
+
+            # Compute difference between current and target position
+            dx = self.goal_position.x - self.pose.x
+            dy = self.goal_position.y - self.pose.y
+
+            # Distance to goal
+            distance = math.sqrt(dx**2 + dy**2)
+
+            # Angle to goal
+            target_angle = math.atan2(dy, dx)
+
+            # Difference between current and desired angle
+            angle_diff = self.normalize_angle(target_angle - self.pose.theta)
+
+            # Step 1: Rotate towards goal
+            if abs(angle_diff) > 0.05:
+                cmd.angular.z = 1.5 if angle_diff > 0 else -1.5
+
+            # Step 2: Move forward
+            elif distance > 0.1:
+                cmd.linear.x = 1.5
+
+            # Step 3: Stop when goal reached
+            else:
+                self.position_goal_active = False
+
+        # -------- DISTANCE CONTROL --------
+        elif self.dist_goal_active:
+
+            # Calculate distance travelled from starting point
+            dx = self.pose.x - self.start_pose.x
+            dy = self.pose.y - self.start_pose.y
+            travelled = math.sqrt(dx**2 + dy**2)
+
+            # Stop if goal reached
+            if travelled >= self.goal_distance:
+                self.dist_goal_active = False
+            else:
+                cmd.linear.x = 1.5 if self.forward else -1.5
+
+        # -------- ANGLE CONTROL --------
+        elif self.angle_goal_active:
+
+            # Compute shortest angular difference
+            angle_diff = self.normalize_angle(self.goal_angle - self.pose.theta)
+
+            # Stop if rotation is complete
+            if abs(angle_diff) < 0.05:
+                self.angle_goal_active = False
+            else:
+                cmd.angular.z = 1.5 if angle_diff > 0 else -1.5
+
+        # Publish velocity command
+        self.vel_pub.publish(cmd)
+
+    # -------- Helper Function --------
 
     def normalize_angle(self, angle):
-        while angle > math.pi:
-            angle -= 2 * math.pi
-        while angle < -math.pi:
-            angle += 2 * math.pi
-        return angle
+        """
+        Normalize angle to range [-pi, pi]
+        This avoids wraparound issues in rotation
+        """
+        return math.atan2(math.sin(angle), math.cos(angle))
 
-    def distance_to_goal(self):
-        return math.sqrt((self.goal_x - self.current_x) ** 2 + (self.goal_y - self.current_y) ** 2)
 
-    def timer_callback(self, msg):
-        vel_msg = Twist()
-
-        # DISTANCE GOAL
-        if self.dist_goal_active:
-            travelled = abs(self.last_distance - self.start_distance)
-
-            if travelled >= self.goal_distance - 0.01:
-                vel_msg.linear.x = 0.0
-                vel_msg.angular.z = 0.0
-                self.velocity_publisher.publish(vel_msg)
-
-                self.dist_goal_active = False
-                self.goal_distance = 0.0
-                rospy.loginfo("Distance goal reached.")
-            else:
-                vel_msg.linear.x = 1.0 if self.forward_movement else -1.0
-                vel_msg.angular.z = 0.0
-                self.velocity_publisher.publish(vel_msg)
-
-        # ANGLE GOAL
-        elif self.angle_goal_active:
-            turned_angle = abs(self.normalize_angle(self.current_theta - self.start_angle))
-
-            if turned_angle >= self.goal_angle - 0.01:
-                vel_msg.linear.x = 0.0
-                vel_msg.angular.z = 0.0
-                self.velocity_publisher.publish(vel_msg)
-
-                self.angle_goal_active = False
-                self.goal_angle = 0.0
-                rospy.loginfo("Angle goal reached.")
-            else:
-                vel_msg.linear.x = 0.0
-                vel_msg.angular.z = 1.0 if self.rotate_anticlockwise else -1.0
-                self.velocity_publisher.publish(vel_msg)
-
-        # POSITION GOAL
-        elif self.position_goal_active:
-            dx = self.goal_x - self.current_x
-            dy = self.goal_y - self.current_y
-            target_angle = math.atan2(dy, dx)
-            angle_error = self.normalize_angle(target_angle - self.current_theta)
-            dist_error = self.distance_to_goal()
-
-            # Stage 0: rotate toward target
-            if self.position_stage == 0:
-                if abs(angle_error) < 0.03:
-                    vel_msg.linear.x = 0.0
-                    vel_msg.angular.z = 0.0
-                    self.velocity_publisher.publish(vel_msg)
-                    self.position_stage = 1
-                    rospy.loginfo("Rotation toward position goal complete. Moving straight.")
-                else:
-                    vel_msg.linear.x = 0.0
-                    vel_msg.angular.z = 1.0 if angle_error > 0 else -1.0
-                    self.velocity_publisher.publish(vel_msg)
-
-            # Stage 1: move straight
-            elif self.position_stage == 1:
-                if dist_error < 0.05:
-                    vel_msg.linear.x = 0.0
-                    vel_msg.angular.z = 0.0
-                    self.velocity_publisher.publish(vel_msg)
-
-                    self.position_goal_active = False
-                    rospy.loginfo("Position goal reached.")
-                else:
-                    # if turtle drifts too much, rotate again
-                    if abs(angle_error) > 0.1:
-                        self.position_stage = 0
-                    else:
-                        vel_msg.linear.x = 1.0
-                        vel_msg.angular.z = 0.0
-                        self.velocity_publisher.publish(vel_msg)
-
-        # NO ACTIVE GOAL
-        else:
-            vel_msg.linear.x = 0.0
-            vel_msg.angular.z = 0.0
-            self.velocity_publisher.publish(vel_msg)
-
+# -------- Main Execution --------
 
 if __name__ == '__main__':
     try:
-        turtlesim_straights_and_turns_class_instance = TurtlesimStraightsAndTurns()
+        TurtlesimController()
     except rospy.ROSInterruptException:
         pass
