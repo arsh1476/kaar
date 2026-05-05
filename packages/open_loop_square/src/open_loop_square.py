@@ -12,8 +12,8 @@ class Drive_Square:
         rospy.init_node('drive_square_node', anonymous=True)
 
        
-        self.pub = rospy.Publisher('/mybota0024/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1)
-        rospy.Subscriber('/mybota0024/fsm_node/mode', FSMState, self.fsm_callback, queue_size=1)
+        self.pub = rospy.Publisher('/mybota002410/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1)
+        rospy.Subscriber('/mybota002410/fsm_node/mode', FSMState, self.fsm_callback, queue_size=1)
 
         self.running = False   # prevent multiple triggers
 
