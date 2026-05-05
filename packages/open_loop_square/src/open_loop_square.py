@@ -4,81 +4,92 @@ import rospy
 from duckietown_msgs.msg import Twist2DStamped
 from duckietown_msgs.msg import FSMState
 
+
 class Drive_Square:
     def __init__(self):
-
+        # Initialize message
         self.cmd_msg = Twist2DStamped()
 
+        # Initialize ROS node
         rospy.init_node('drive_square_node', anonymous=True)
 
-       
-        self.pub = rospy.Publisher('/mybota002410/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1)
-        rospy.Subscriber('/mybota002410/fsm_node/mode', FSMState, self.fsm_callback, queue_size=1)
+        # IMPORTANT: use your robot name here
+        self.vehicle_name = "mybota002410"
 
-        self.running = False   # prevent multiple triggers
+        # Publisher
+        self.pub = rospy.Publisher(
+            f'/{self.vehicle_name}/car_cmd_switch_node/cmd',
+            Twist2DStamped,
+            queue_size=1
+        )
 
+        # Subscriber
+        rospy.Subscriber(
+            f'/{self.vehicle_name}/fsm_node/mode',
+            FSMState,
+            self.fsm_callback,
+            queue_size=1
+        )
+
+        self.is_running = False
+
+    # FSM callback
     def fsm_callback(self, msg):
-        rospy.loginfo("State: %s", msg.state)
+        rospy.loginfo(f"FSM State: {msg.state}")
 
         if msg.state == "NORMAL_JOYSTICK_CONTROL":
+            self.is_running = False
             self.stop_robot()
-            self.running = False
 
-        elif msg.state == "LANE_FOLLOWING" and not self.running:
-            self.running = True
+        elif msg.state == "LANE_FOLLOWING" and not self.is_running:
+            self.is_running = True
             rospy.sleep(1)
             self.move_robot()
 
+    # Stop robot
     def stop_robot(self):
         self.cmd_msg.header.stamp = rospy.Time.now()
         self.cmd_msg.v = 0.0
         self.cmd_msg.omega = 0.0
         self.pub.publish(self.cmd_msg)
+        rospy.loginfo("Robot Stopped")
 
-    def run(self):
-        rospy.spin()
-
+    # Move in square
     def move_robot(self):
 
-        # 🔧 TUNE THESE VALUES
-        forward_speed = 0.3
-        turn_speed = 4.0
-
-        forward_time = 3.0   # adjust for ~1 meter
-        turn_time = 1.0      # adjust for ~90 degrees
-
         for i in range(4):
-
-            rospy.loginfo(f"Side {i+1}: Moving Forward")
+            rospy.loginfo(f"Side {i+1}")
 
             # Move forward
             self.cmd_msg.header.stamp = rospy.Time.now()
-            self.cmd_msg.v = forward_speed
+            self.cmd_msg.v = 0.3      # forward speed
             self.cmd_msg.omega = 0.0
             self.pub.publish(self.cmd_msg)
+            rospy.loginfo("Moving forward")
+            rospy.sleep(2.8)          # adjust for ~1 meter
 
-            rospy.sleep(forward_time)
-
-            # Stop
+            # Stop briefly
             self.stop_robot()
             rospy.sleep(0.5)
-
-            rospy.loginfo(f"Side {i+1}: Turning")
 
             # Turn 90 degrees
             self.cmd_msg.header.stamp = rospy.Time.now()
             self.cmd_msg.v = 0.0
-            self.cmd_msg.omega = turn_speed
+            self.cmd_msg.omega = 2.2  # turning speed
             self.pub.publish(self.cmd_msg)
-
-            rospy.sleep(turn_time)
+            rospy.loginfo("Turning 90 degrees")
+            rospy.sleep(1.2)          # adjust angle
 
             # Stop again
             self.stop_robot()
             rospy.sleep(0.5)
 
-        rospy.loginfo("Square complete!")
+        # Final stop
         self.stop_robot()
+        rospy.loginfo("Finished square path")
+
+    def run(self):
+        rospy.spin()
 
 
 if __name__ == '__main__':
