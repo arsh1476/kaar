@@ -1,0 +1,6 @@
+<launch>
+    <node pkg="target_follower"
+          type="target_follower.py"
+          name="target_follower_node"
+          output="screen" />
+</launch>
