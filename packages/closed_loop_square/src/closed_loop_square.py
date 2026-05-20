@@ -9,7 +9,7 @@ class ClosedLoopSquare:
     def __init__(self):
         rospy.init_node("collision_prevention_square_node", anonymous=True)
 
-        self.robot_name = "mybota002437"
+        self.robot_name = "mybota002437jk"
 
         self.cmd_topic = "/" + self.robot_name + "/car_cmd_switch_node/cmd"
         self.left_encoder_topic = "/" + self.robot_name + "/left_wheel_encoder_node/tick"
