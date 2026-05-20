@@ -2,18 +2,22 @@
 
 import rospy
 from duckietown_msgs.msg import Twist2DStamped, FSMState, WheelEncoderStamped
+from sensor_msgs.msg import Range
 
 
 class ClosedLoopSquare:
     def __init__(self):
-        rospy.init_node("closed_loop_square_node", anonymous=True)
+        rospy.init_node("collision_prevention_square_node", anonymous=True)
 
-        self.robot_name = "mybota002410"
+        self.robot_name = "mybota002437"
 
         self.cmd_topic = "/" + self.robot_name + "/car_cmd_switch_node/cmd"
         self.left_encoder_topic = "/" + self.robot_name + "/left_wheel_encoder_node/tick"
         self.right_encoder_topic = "/" + self.robot_name + "/right_wheel_encoder_node/tick"
         self.fsm_topic = "/" + self.robot_name + "/fsm_node/mode"
+
+        # ToF distance sensor topic
+        self.tof_topic = "/" + self.robot_name + "/front_center_tof_driver_node/range"
 
         self.cmd_pub = rospy.Publisher(
             self.cmd_topic,
@@ -25,17 +29,27 @@ class ClosedLoopSquare:
         rospy.Subscriber(self.right_encoder_topic, WheelEncoderStamped, self.right_encoder_callback)
         rospy.Subscriber(self.fsm_topic, FSMState, self.fsm_callback)
 
+        # Subscribe to front ToF sensor
+        rospy.Subscriber(self.tof_topic, Range, self.tof_callback)
+
         self.left_ticks = 0
         self.right_ticks = 0
 
         self.started = False
         self.running = False
 
-        # IMPORTANT:
-        # Change these two values after your testing.
-        # Measure encoder ticks for 1 metre and 90 degrees on your robot.
+        # Encoder calibration values
+        # Change these after testing on your robot
         self.TICKS_PER_METER = 850
         self.TICKS_PER_90_DEGREE = 300
+
+        # Collision prevention variables
+        self.current_tof_distance = 999.0
+        self.obstacle_detected = False
+
+        # Stopping threshold in metres
+        # 0.25 means robot stops when obstacle is closer than 25 cm
+        self.STOP_DISTANCE_THRESHOLD = 0.25
 
         rospy.on_shutdown(self.stop_robot)
 
@@ -45,11 +59,19 @@ class ClosedLoopSquare:
     def right_encoder_callback(self, msg):
         self.right_ticks = msg.data
 
+    def tof_callback(self, msg):
+        self.current_tof_distance = msg.range
+
+        if msg.range > 0.0 and msg.range < self.STOP_DISTANCE_THRESHOLD:
+            self.obstacle_detected = True
+        else:
+            self.obstacle_detected = False
+
     def fsm_callback(self, msg):
         if msg.state == "LANE_FOLLOWING" and not self.started:
             self.started = True
             self.running = True
-            rospy.loginfo("Starting closed loop square...")
+            rospy.loginfo("Starting closed loop square with collision prevention...")
             self.draw_square()
             self.running = False
             rospy.loginfo("Closed loop square completed.")
@@ -72,7 +94,8 @@ class ClosedLoopSquare:
             rospy.sleep(0.05)
 
     def move_straight(self, distance_meter, speed):
-        rospy.loginfo("Moving straight: distance = %.2f m, speed = %.2f", distance_meter, speed)
+        rospy.loginfo("Moving straight with collision prevention: distance = %.2f m, speed = %.2f",
+                      distance_meter, speed)
 
         start_left = self.left_ticks
         start_right = self.right_ticks
@@ -95,6 +118,20 @@ class ClosedLoopSquare:
             if average_ticks >= target_ticks:
                 break
 
+            # Collision prevention is active only during forward straight movement
+            if distance_meter > 0 and self.obstacle_detected:
+                rospy.loginfo("Obstacle detected at %.2f m. Robot stopped and waiting...",
+                              self.current_tof_distance)
+
+                self.stop_robot()
+
+                # Wait until obstacle is removed
+                while not rospy.is_shutdown() and self.obstacle_detected:
+                    self.stop_robot()
+                    rate.sleep()
+
+                rospy.loginfo("Obstacle removed. Continuing straight movement...")
+
             self.publish_cmd(move_speed, 0.0)
             rate.sleep()
 
@@ -102,7 +139,8 @@ class ClosedLoopSquare:
         rospy.loginfo("Straight movement completed.")
 
     def rotate_in_place(self, angle_degree, angular_speed):
-        rospy.loginfo("Rotating: angle = %.2f degrees, angular speed = %.2f", angle_degree, angular_speed)
+        rospy.loginfo("Rotating: angle = %.2f degrees, angular speed = %.2f",
+                      angle_degree, angular_speed)
 
         start_left = self.left_ticks
         start_right = self.right_ticks
@@ -125,6 +163,7 @@ class ClosedLoopSquare:
             if average_ticks >= target_ticks:
                 break
 
+            # Collision prevention is NOT active during rotation
             self.publish_cmd(0.0, turn_speed)
             rate.sleep()
 
@@ -132,7 +171,7 @@ class ClosedLoopSquare:
         rospy.loginfo("Rotation completed.")
 
     def draw_square(self):
-        rospy.loginfo("Drawing 1 metre closed loop square...")
+        rospy.loginfo("Drawing 1 metre square with collision prevention...")
 
         for side in range(4):
             rospy.loginfo("Square side %d", side + 1)
